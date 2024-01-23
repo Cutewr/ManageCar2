@@ -134,6 +134,7 @@ void MainWindow::readFrame()
 
     // 将结果转换为 QString
     QString resultString = QString::fromUtf8(result).trimmed();
+    qDebug()<<resultString;
     // 使用正则表达式提取目标字符串
     static QRegularExpression regex("\\['(.*?)'");
     QRegularExpressionMatch match = regex.match(resultString);
@@ -148,6 +149,12 @@ void MainWindow::readFrame()
     if (recentResults.size() < 3 && extractedString!=""&&extractedString!=lastSavedResult) {
         recentResults << extractedString;
     }
+
+    QSet<QString> uniqueElements2(recentResults.begin(),recentResults.end());
+    if(recentResults.size()>=2&&uniqueElements2.size()!=1){
+        recentResults.removeFirst();
+    }
+
     QString tempString;
     QSet<QString> uniqueElements(recentResults.begin(),recentResults.end());
     if (recentResults.size() == 3 && uniqueElements.size() == 1) {
@@ -160,6 +167,39 @@ void MainWindow::readFrame()
         QImage processedImage(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_RGB888);
         QPixmap processedPixmap = QPixmap::fromImage(processedImage.rgbSwapped());
         ui->focusedLabel->setPixmap(processedPixmap);
+
+        // 在字符串中搜索匹配的部分
+        QString positionString;
+        QRegularExpression regex3("\\[(\\d+,\\s*\\d+,\\s*\\d+,\\s*\\d+)\\]");
+        QRegularExpressionMatch match3 = regex3.match(resultString);
+        // 提取匹配的部分
+        if (match3.hasMatch()) {
+            positionString = match3.captured(1);
+            qDebug() << "position:" << positionString;
+
+            // 将 QString 转换为 std::vector<int>
+            QStringList coordList = positionString.split(", ");
+            std::vector<int> coords;
+            for (const QString& coord : coordList) {
+                coords.push_back(coord.toInt());
+            }
+
+            // 定义坐标
+            int x = coords[0];
+            int y = coords[1];
+            int width = coords[2] - x;
+            int height = coords[3] - y;
+
+            // 截取区域
+            cv::Rect roi(x, y, width, height);
+            cv::Mat croppedFrame = frame(roi).clone();  // 使用clone()来复制图像
+
+            QImage croppedImage(croppedFrame.data, croppedFrame.cols, croppedFrame.rows, croppedFrame.step, QImage::Format_RGB888);
+            QPixmap croppedPixmap = QPixmap::fromImage(croppedImage.rgbSwapped());
+            ui->label_2->setPixmap(croppedPixmap);
+        } else {
+            qDebug() << "No position.";
+        }
         recentResults.clear();
     }
 }
