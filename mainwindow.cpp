@@ -4,7 +4,7 @@
 #include <QSqlError>
 #include <vector>
 #include <QProcess>
-#include <Python.h>
+//#include <Python.h>
 #include <QDir>
 #include <QTimer>
 #include <QImage>
@@ -28,7 +28,7 @@ MainWindow::MainWindow(QWidget *parent)
     createConnection();
 
     mycharge =new chargeDia(this);
-    connect(ui->pushButton,&QPushButton::clicked,mycharge,&chargeDia::open);
+    connect(ui->button1,&QPushButton::clicked,mycharge,&chargeDia::open);
     connect(this,SIGNAL(chargeSignal(const QString &)),mycharge,SLOT(chargeSlot(const QString &)));
 
     mycount= new countdia(this);
@@ -37,6 +37,8 @@ MainWindow::MainWindow(QWidget *parent)
     // 初始化摄像头捕获
     // 在 MainWindow 类的构造函数中的初始化列表中添加
     capture = new cv::VideoCapture(0,cv::CAP_V4L2);  // 0表示默认摄像头，可以根据实际情况修改
+   // capture = new cv::VideoCapture(0,cv::CAP_V4L2);  // 0表示默认摄像头，可以根据实际情况修改
+   // cv::VideoCapture capture(0);
     if (!capture->isOpened()) {
         qDebug() << "Error: Could not open camera.";
     }
@@ -45,11 +47,10 @@ MainWindow::MainWindow(QWidget *parent)
     // 连接定时器的超时信号到处理槽
     connect(timer, &QTimer::timeout, this, &MainWindow::readFrame);
     // 设置定时器间隔，单位毫秒
-    timer->start(500);  // 30帧每秒，可以根据需要调整
+    timer->start(100);  // 30帧每秒，可以根据需要调整
 
     httpmanager = new QNetworkAccessManager;
     connect(httpmanager, SIGNAL(finished(QNetworkReply*)), this, SLOT(read_ack(QNetworkReply*)));
-
 }
 
 MainWindow::~MainWindow()
@@ -84,9 +85,9 @@ void MainWindow::readFrame()
     // 将实时视频帧数据传递给 Python 脚本
     QByteArray imageData(reinterpret_cast<const char*>(frame.data), frame.total());
     // 设置 Python 脚本路径
-    QString scriptPath = "/home/wr/PycharmProjects/pythonProject3/test03.py";
+    QString scriptPath = "/home/wr/PycharmProjects/pythonProject/main.py";
     // 构建 Python 解释器路径
-    QString pythonInterpreter = "/home/wr/anaconda3/envs/pytorch/bin/python";
+    QString pythonInterpreter = "/usr/bin/python3";
     // 获取当前工作目录
     QString currentDir = QDir::currentPath();
     // 设置 Python 脚本运行的工作目录
@@ -108,7 +109,6 @@ void MainWindow::readFrame()
         qDebug() << "Error: Could not start Python process.";
         return;
     }
-
     // 将图像数据保存为 JPEG 格式
     // Convert QByteArray to std::vector<uchar>
     std::vector<uchar> imageDataVector(imageData.begin(), imageData.end());
@@ -138,6 +138,9 @@ void MainWindow::readFrame()
     // 使用正则表达式提取目标字符串
     static QRegularExpression regex("\\['(.*?)'");
     QRegularExpressionMatch match = regex.match(resultString);
+
+    static QRegularExpression regex2("time is(\\d+\\.\\d+)");
+
     QString extractedString;
     if (match.hasMatch()) {
         extractedString = match.captured(1);
@@ -149,83 +152,102 @@ void MainWindow::readFrame()
     if (recentResults.size() < 3 && extractedString!=""&&extractedString!=lastSavedResult) {
         recentResults << extractedString;
     }
-
     QSet<QString> uniqueElements2(recentResults.begin(),recentResults.end());
-    if(recentResults.size()>=2&&uniqueElements2.size()!=1){
+    if(recentResults.size()==3&&uniqueElements2.size()!=1){
         recentResults.removeFirst();
     }
-
+    QSet<QString> uniqueElements3(recentResults.begin(),recentResults.end());
+    if(recentResults.size()==2&&uniqueElements3.size()!=1){
+        recentResults.removeFirst();
+    }
     QString tempString;
+    QString TimeString;
     QSet<QString> uniqueElements(recentResults.begin(),recentResults.end());
     if (recentResults.size() == 3 && uniqueElements.size() == 1) {
+        QRegularExpressionMatch match2 = regex2.match(resultString);
+        if(match2.hasMatch()){
+            QString timeValue=match2.captured(1);
+            TimeString=",Cost Time:"+timeValue;
+        }else{
+            qDebug()<<"Time Value Not Found.";
+            TimeString="";
+        }
         qDebug() << "Python Script Output: " << extractedString;
         lastSavedResult=extractedString;
         tempString=extractedString;
-        handlePlate(tempString);
-
-        // 将帧显示在第二个 QLabel 上
-        QImage processedImage(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_RGB888);
-        QPixmap processedPixmap = QPixmap::fromImage(processedImage.rgbSwapped());
-        ui->focusedLabel->setPixmap(processedPixmap);
 
         // 在字符串中搜索匹配的部分
         QString positionString;
         QRegularExpression regex3("\\[(\\d+,\\s*\\d+,\\s*\\d+,\\s*\\d+)\\]");
         QRegularExpressionMatch match3 = regex3.match(resultString);
         // 提取匹配的部分
-        if (match3.hasMatch()) {
-            positionString = match3.captured(1);
-            qDebug() << "position:" << positionString;
+        positionString = match3.captured(1);
+        qDebug() << "position:" << positionString;
 
-            // 将 QString 转换为 std::vector<int>
-            QStringList coordList = positionString.split(", ");
-            std::vector<int> coords;
-            for (const QString& coord : coordList) {
-                coords.push_back(coord.toInt());
-            }
-
-            // 定义坐标
-            int x = coords[0];
-            int y = coords[1];
-            int width = coords[2] - x;
-            int height = coords[3] - y;
-
-            // 截取区域
-            cv::Rect roi(x, y, width, height);
-            cv::Mat croppedFrame = frame(roi).clone();  // 使用clone()来复制图像
-
-            QImage croppedImage(croppedFrame.data, croppedFrame.cols, croppedFrame.rows, croppedFrame.step, QImage::Format_RGB888);
-            QPixmap croppedPixmap = QPixmap::fromImage(croppedImage.rgbSwapped());
-            ui->label_2->setPixmap(croppedPixmap);
-        } else {
-            qDebug() << "No position.";
+        // 将 QString 转换为 std::vector<int>
+        QStringList coordList = positionString.split(", ");
+        std::vector<int> coords;
+        for (const QString& coord : coordList) {
+            coords.push_back(coord.toInt());
         }
+
+        // 定义坐标
+        int x = coords[0];
+        int y = coords[1];
+        int width = coords[2] - x;
+        int height = coords[3] - y;
+
+        // 截取区域
+        cv::Rect roi(x, y, width, height);
+        cv::Mat croppedFrame = frame(roi).clone();  // 使用clone()来复制图像
+
+        // 将帧显示在第二个 QLabel 上
+        QImage processedImage(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_RGB888);
+        QPixmap processedPixmap = QPixmap::fromImage(processedImage.rgbSwapped());
+        ui->focusedLabel->setPixmap(processedPixmap);
+
+        QImage croppedImage(croppedFrame.data, croppedFrame.cols, croppedFrame.rows, croppedFrame.step, QImage::Format_RGB888);
+        QPixmap croppedPixmap = QPixmap::fromImage(croppedImage.rgbSwapped());
+        ui->label_2->setPixmap(croppedPixmap);
+
+        handlePlate(tempString);
+
+        QString folderPath="/home/wr/plateResult/image";
+        QDir dir(folderPath);
+        QStringList nameFilters;
+        nameFilters<<"image*.jpg";
+        QStringList fileList=dir.entryList(nameFilters,QDir::Files);
+        int maxIndex=0;
+        for(const QString& fileName : fileList){
+            QString numberStr=fileName.section("image",1,1).section(".",0,0);
+            bool ok;
+            int index=numberStr.toInt(&ok);
+            if(ok&&index>maxIndex){
+                maxIndex=index;
+            }
+        }
+        QString newFileName=QString("image%1.jpg").arg(maxIndex+1);
+        QString newCroppedFileName=QString("image%1").arg(maxIndex+1)+"_Cropped.jpg";
+        QString imagePath=QDir(folderPath).filePath(newFileName);
+        QString croppedImagePath=QDir(folderPath).filePath(newCroppedFileName);
+        QString temp=QString(newFileName+":"+"License Plate:"+tempString+TimeString+",Current Time:"+QDateTime::currentDateTime().toString());
+        saveResult(temp);
+        cv::imwrite(imagePath.toStdString(),frame);
+        cv::imwrite(croppedImagePath.toStdString(),croppedFrame);
+
         recentResults.clear();
     }
 }
 
 void MainWindow::saveResult(const QString &result)
 {
-    QString resultFilePath = "/home/wr/plateresult/test.txt";
+    QString resultFilePath = "/home/wr/plateResult/test.txt";
     QFile resultFile(resultFilePath);
     if (resultFile.open(QIODevice::WriteOnly | QIODevice::Append)) {
         QTextStream stream(&resultFile);
         stream << result << "\n";
     }
     resultFile.close();
-}
-
-
-void MainWindow::on_pushButton_2_clicked()
-{
-    std::vector<QMap<QString, QString>> vectorOfMaps;
-    vectorOfMaps.push_back(countFee("Internal","wechat"));
-    vectorOfMaps.push_back(countFee("Internal","alipay"));
-    vectorOfMaps.push_back(countFee("Internal","cash"));
-    vectorOfMaps.push_back(countFee("Visitor","wechat"));
-    vectorOfMaps.push_back(countFee("Visitor","alipay"));
-    vectorOfMaps.push_back(countFee("Visitor","cash"));
-    mycount->processData(vectorOfMaps);
 }
 
 QMap<QString, QString> MainWindow::countFee(QString type,QString payw){
@@ -251,9 +273,9 @@ QMap<QString, QString> MainWindow::countFee(QString type,QString payw){
 void MainWindow::on_pushButton_3_clicked()
 {
     // 设置Python脚本路径
-    QString scriptPath = "/home/wr/PycharmProjects/pythonProject3/test03.py";
+    QString scriptPath = "/home/wr/PycharmProjects/pythonProject/test01.py";
     // 构建Python解释器路径
-    QString pythonInterpreter = "/usr/bin/python3.10";
+    QString pythonInterpreter = "/usr/bin/python3";
 
     // 获取当前工作目录
     QString currentDir = QDir::currentPath();
@@ -347,4 +369,23 @@ void MainWindow::handlePlate(QString text){
     }
 }
 
+
+
+void MainWindow::on_button1_clicked()
+{
+
+}
+
+
+void MainWindow::on_pushButton_2_clicked()
+{
+    std::vector<QMap<QString, QString>> vectorOfMaps;
+    vectorOfMaps.push_back(countFee("Internal","wechat"));
+    vectorOfMaps.push_back(countFee("Internal","alipay"));
+    vectorOfMaps.push_back(countFee("Internal","cash"));
+    vectorOfMaps.push_back(countFee("Visitor","wechat"));
+    vectorOfMaps.push_back(countFee("Visitor","alipay"));
+    vectorOfMaps.push_back(countFee("Visitor","cash"));
+    mycount->processData(vectorOfMaps);
+}
 
